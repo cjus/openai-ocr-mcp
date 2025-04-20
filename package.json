@@ -1,0 +1,36 @@
+{
+  "name": "openai-ocr-mcp",
+  "version": "1.0.0",
+  "description": "Stdio-based Model Context Protocol (MCP) Server for OCR using OpenAI's vision API",
+  "main": "dist/ocr.js",
+  "bin": {
+    "openai-ocr-mcp": "dist/ocr.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/ocr.js",
+    "start": "node --no-deprecation dist/ocr.js",
+    "dev": "ts-node --transpile-only src/ocr.ts",
+    "test": "echo '{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"initialize\"}' | node dist/ocr.js",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/ocr.js"
+  },
+  "keywords": [
+    "mcp",
+    "openai",
+    "ocr",
+    "text-extraction",
+    "vision",
+    "gpt4o",
+    "cursor"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.10.2",
+    "@types/node": "^22.14.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

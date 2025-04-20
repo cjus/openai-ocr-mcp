@@ -1,0 +1,28 @@
+# Dependency directories
+node_modules/
+
+# TypeScript build outputs
+dist/
+build/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory
+coverage/
+
+# IDE / Editor directories
+.idea/
+.vscode/
+*.sublime-*
+.DS_Store
+Thumbs.db 
+.env

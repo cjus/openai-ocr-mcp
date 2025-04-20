@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ocr": {
+      "command": "node",
+      "args": ["dist/ocr.js"]
+    }
+  }
+} 

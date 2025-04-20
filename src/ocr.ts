@@ -7,8 +7,47 @@
  * 
  * This server:
  * 1. Accepts JSON-RPC requests via stdin
- * 2. Processes images using OpenAI's GPT-4o vision model
- * 3. Returns extracted text via stdout
+ * 2. Processes images using OpenAI's GPT-4.1-mini vision model
+ * 3. Returns extracted text and analysis via stdout
+ * 4. Automatically saves extracted text to a file alongside the image
+ *    in the format: {image_name}-{hash}.txt where {hash} is a unique
+ *    8-character hash of the extracted text content
+ * 5. Automatically generates and appends AI analysis of the extracted text
+ * 6. Provides tools for both text extraction and analysis management
+ * 
+ * Available Tools:
+ * - extract_text_from_image: Extract and analyze text from images
+ * - append_analysis: Append additional AI analysis to existing OCR text files
+ * 
+ * Model Information:
+ * - Uses GPT-4.1-mini for vision tasks
+ * - Optimized for text extraction and analysis
+ * - Supports high-detail image analysis
+ * 
+ * Features:
+ * - Image validation (size, format, accessibility)
+ * - Robust error handling and logging
+ * - Automatic text file creation with content hashing
+ * - Automatic AI analysis generation and storage
+ * - Support for both standard and project-specific OpenAI API keys
+ * - LLM response tracking and management
+ * 
+ * File Naming Example:
+ * - Input image: /path/to/scan.jpg
+ * - Output text: /path/to/scan-a1b2c3d4.txt
+ *   where 'a1b2c3d4' is a unique hash of the extracted text
+ * 
+ * File Format:
+ * The output text file contains:
+ * 1. OCR EXTRACTED TEXT section with raw text from the image
+ * 2. LLM ANALYSIS section(s) with AI-generated analysis
+ *    - Initial analysis generated during extraction
+ *    - Additional analyses can be appended using the append_analysis tool
+ * 
+ * Environment Setup:
+ * - Requires OpenAI API key in environment variables
+ * - Supports multiple API key formats (OPENAI_API_KEY, openai_api_key)
+ * - Optional .env file support for API key configuration
  */
 
 // Core imports
@@ -17,6 +56,7 @@ import * as path from 'path';
 import { createInterface } from 'readline';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import * as dotenv from 'dotenv';
+import { createHash } from 'crypto';
 
 // ============================================================================
 // Configuration
@@ -24,6 +64,21 @@ import * as dotenv from 'dotenv';
 
 // Global API key variable
 let OPENAI_API_KEY: string | undefined;
+
+// Add conversation tracking
+interface ConversationState {
+  lastOcrResult?: string;
+  lastImagePath?: string;
+  llmResponses: Array<{
+    timestamp: string;
+    response: string;
+  }>;
+}
+
+// Initialize conversation state
+const conversationState: ConversationState = {
+  llmResponses: []
+};
 
 /**
  * Validate the API key format and check for common issues
@@ -272,6 +327,26 @@ const OCR_TOOL: McpTool = {
   }
 };
 
+// Add new tool definition
+const APPEND_ANALYSIS_TOOL: McpTool = {
+  name: "append_analysis",
+  description: "Append LLM analysis to an OCR text file. This tool is used to add AI commentary to existing OCR results.",
+  parameters: {
+    type: "object",
+    properties: {
+      text_file_path: {
+        type: "string",
+        description: "Path to the OCR text file to append analysis to"
+      },
+      analysis: {
+        type: "string",
+        description: "The LLM's analysis to append to the file"
+      }
+    },
+    required: ["text_file_path", "analysis"]
+  }
+};
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -374,21 +449,120 @@ function getMimeType(filePath: string): string {
 }
 
 /**
- * Save extracted text to a file
+ * Generate a short hash of text content
+ */
+function generateShortHash(text: string): string {
+  // Create a hash of the text content
+  const hash = createHash('sha256').update(text).digest('hex');
+  // Return first 8 characters of the hash
+  return hash.substring(0, 8);
+}
+
+/**
+ * Save extracted text to a file with hash in the filename
  */
 function saveExtractedText(imagePath: string, text: string): string {
   // Get the directory and filename without extension
   const dir = path.dirname(imagePath);
   const baseNameWithoutExt = path.basename(imagePath, path.extname(imagePath));
-  const txtPath = path.join(dir, `${baseNameWithoutExt}.txt`);
+  
+  // Generate hash of the text content
+  const hash = generateShortHash(text);
+  
+  // Create filename with format: {image_name}-{hash}.txt
+  const txtPath = path.join(dir, `${baseNameWithoutExt}-${hash}.txt`);
 
   try {
-    fs.writeFileSync(txtPath, text, 'utf8');
+    // Save the initial OCR text
+    fs.writeFileSync(txtPath, `OCR EXTRACTED TEXT:\n==================\n${text}\n`, 'utf8');
     log(`Successfully saved extracted text to: ${txtPath}`);
     return txtPath;
   } catch (error) {
     log(`Error saving text file: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to save text file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Append LLM response to the text file
+ */
+function appendLlmResponseToFile(txtPath: string, response: any): void {
+  try {
+    // Format the LLM response section
+    const timestamp = new Date().toISOString();
+    const separator = '\n\nLLM ANALYSIS:\n=============\n';
+    const formattedResponse = typeof response === 'string' ? response : JSON.stringify(response, null, 2);
+    const appendText = `${separator}[${timestamp}]\n${formattedResponse}\n`;
+
+    // Append to the file
+    fs.appendFileSync(txtPath, appendText, 'utf8');
+    log(`Successfully appended LLM response to: ${txtPath}`);
+  } catch (error) {
+    log(`Error appending LLM response: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Log LLM response to the OCR result and append to text file
+ */
+function logLlmResponse(response: any): void {
+  const timestamp = new Date().toISOString();
+  log(`[LLM Response at ${timestamp}]`);
+  log(`Previous OCR image: ${conversationState.lastImagePath}`);
+  log(`LLM commented on OCR result: ${JSON.stringify(response, null, 2)}`);
+  
+  // Store in conversation state
+  conversationState.llmResponses.push({
+    timestamp,
+    response: JSON.stringify(response)
+  });
+
+  // If we have the last image path, try to find and update the corresponding text file
+  if (conversationState.lastImagePath) {
+    try {
+      const dir = path.dirname(conversationState.lastImagePath);
+      const baseNameWithoutExt = path.basename(conversationState.lastImagePath, path.extname(conversationState.lastImagePath));
+      
+      log(`Looking for text file in directory: ${dir}`);
+      log(`Searching for files starting with: ${baseNameWithoutExt}-`);
+      
+      // Read the directory to find the matching text file
+      const files = fs.readdirSync(dir);
+      log(`Found ${files.length} files in directory`);
+      
+      const matchingFiles = files.filter(file => 
+        file.startsWith(baseNameWithoutExt + '-') && 
+        file.endsWith('.txt')
+      );
+      log(`Found ${matchingFiles.length} matching text files: ${JSON.stringify(matchingFiles)}`);
+
+      if (matchingFiles.length > 0) {
+        // Use the most recently created file if there are multiple matches
+        const matchingFile = matchingFiles[matchingFiles.length - 1];
+        const txtPath = path.join(dir, matchingFile);
+        log(`Selected text file to update: ${txtPath}`);
+        
+        // Read current content for debugging
+        const currentContent = fs.readFileSync(txtPath, 'utf8');
+        log(`Current file content (first 100 chars): ${currentContent.substring(0, 100)}...`);
+        
+        appendLlmResponseToFile(txtPath, response);
+        
+        // Verify the append operation
+        const updatedContent = fs.readFileSync(txtPath, 'utf8');
+        log(`Updated file content (last 100 chars): ${updatedContent.substring(updatedContent.length - 100)}...`);
+      } else {
+        log(`Could not find corresponding text file for image: ${conversationState.lastImagePath}`);
+        log(`Available files in directory: ${JSON.stringify(files)}`);
+      }
+    } catch (error) {
+      log(`Error handling LLM response file update: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof Error && error.stack) {
+        log(`Stack trace: ${error.stack}`);
+      }
+    }
+  } else {
+    log('No previous image path found in conversation state');
   }
 }
 
@@ -514,7 +688,7 @@ async function extractTextFromImage(args: OcrParams): Promise<McpToolResult> {
             content: [
               { 
                 type: 'text', 
-                text: 'Extract all text from this image. Please provide only the extracted text without any additional commentary.' 
+                text: 'Extract all text from this image and provide a detailed analysis of its contents. Include both the raw text and your analysis.' 
               },
               { 
                 type: 'image_url',
@@ -556,7 +730,7 @@ async function extractTextFromImage(args: OcrParams): Promise<McpToolResult> {
         log(`curl stderr (full): ${data.toString()}`);
       });
       
-      curl.on('close', (code: number) => {
+      curl.on('close', async (code: number) => {
         if (code !== 0) {
           log(`curl process exited with code ${code}`);
           log(`Full error output: ${errorOutput}`);
@@ -574,13 +748,36 @@ async function extractTextFromImage(args: OcrParams): Promise<McpToolResult> {
             return;
           }
           
-          const extractedText = response.choices[0].message.content || "No text extracted";
+          const fullResponse = response.choices[0].message.content || "No text extracted";
+          
+          // Split the response into extracted text and analysis
+          const parts = fullResponse.split(/\n\n(?=Analysis:|Interpretation:|Summary:|Understanding:)/i);
+          const extractedText = parts[0];
+          const analysis = parts.length > 1 ? parts.slice(1).join('\n\n') : '';
+          
           log(`Successfully extracted ${extractedText.length} characters of text`);
+          
+          // Store the OCR result in conversation state
+          conversationState.lastOcrResult = extractedText;
+          conversationState.lastImagePath = imagePath;
           
           // Save the extracted text to a file
           try {
             const txtPath = saveExtractedText(imagePath, extractedText);
             log(`Text file created: ${txtPath}`);
+            
+            // If we have analysis, append it using our tool
+            if (analysis) {
+              try {
+                await handleAppendAnalysis({
+                  text_file_path: txtPath,
+                  analysis: analysis
+                });
+                log('Successfully appended initial analysis');
+              } catch (error) {
+                log(`Warning: Failed to append initial analysis: ${error}`);
+              }
+            }
             
             resolve({ 
               content: [
@@ -653,6 +850,10 @@ function handleInitialize(id: string | number, params?: any): void {
         [OCR_TOOL.name]: {
           description: OCR_TOOL.description,
           parameters: OCR_TOOL.parameters
+        },
+        [APPEND_ANALYSIS_TOOL.name]: {
+          description: APPEND_ANALYSIS_TOOL.description,
+          parameters: APPEND_ANALYSIS_TOOL.parameters
         }
       }
     }
@@ -680,7 +881,7 @@ function handleListOfferings(id: string | number): void {
       version: SERVER_VERSION
     },
     offerings: {
-      tools: [OCR_TOOL]
+      tools: [OCR_TOOL, APPEND_ANALYSIS_TOOL]
     }
   };
   
@@ -713,6 +914,14 @@ async function handleCallTool(id: string | number, params: any): Promise<void> {
       log(`Error executing tool: ${error instanceof Error ? error.message : String(error)}`);
       sendError(id, -32000, `Error executing tool: ${error instanceof Error ? error.message : String(error)}`);
     }
+  } else if (name === APPEND_ANALYSIS_TOOL.name) {
+    try {
+      const result = await handleAppendAnalysis(args as { text_file_path: string; analysis: string });
+      sendResponse(id, result);
+    } catch (error) {
+      log(`Error executing tool: ${error instanceof Error ? error.message : String(error)}`);
+      sendError(id, -32000, `Error executing tool: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } else {
     log(`Tool not found: ${name}`);
     sendError(id, -32601, `Tool not found: ${name}`);
@@ -725,7 +934,44 @@ async function handleCallTool(id: string | number, params: any): Promise<void> {
  */
 function handleNotification(method: string, params?: any): void {
   log(`Handling notification: ${method}`);
+  log(`Notification params: ${JSON.stringify(params, null, 2)}`);
+  
   switch (method) {
+    case 'notifications/llm_response':
+      log('Received LLM response notification');
+      // First log the response as usual
+      logLlmResponse(params);
+      
+      // Then use our append_analysis tool if we have a valid text file path
+      if (conversationState.lastOcrResult && conversationState.lastImagePath) {
+        const dir = path.dirname(conversationState.lastImagePath);
+        const baseNameWithoutExt = path.basename(conversationState.lastImagePath, path.extname(conversationState.lastImagePath));
+        
+        // Find the corresponding text file
+        try {
+          const files = fs.readdirSync(dir);
+          const matchingFiles = files.filter(file => 
+            file.startsWith(baseNameWithoutExt + '-') && 
+            file.endsWith('.txt')
+          );
+          
+          if (matchingFiles.length > 0) {
+            // Use the most recently created file
+            const txtPath = path.join(dir, matchingFiles[matchingFiles.length - 1]);
+            
+            // Call our append_analysis tool
+            handleAppendAnalysis({
+              text_file_path: txtPath,
+              analysis: typeof params === 'string' ? params : JSON.stringify(params, null, 2)
+            }).catch(error => {
+              log(`Error appending analysis: ${error}`);
+            });
+          }
+        } catch (error) {
+          log(`Error finding text file: ${error}`);
+        }
+      }
+      break;
     case 'notifications/initialized':
       log('Client has been fully initialized');
       break;
@@ -748,7 +994,7 @@ function handleToolsList(id: string | number): void {
     tools: [
       {
         name: OCR_TOOL.name,
-        description: "Extract text from images using OpenAI's vision capabilities. Simply provide the full path to a local image file.",
+        description: OCR_TOOL.description,
         inputSchema: {
           type: "object",
           properties: {
@@ -774,6 +1020,45 @@ function handleToolsList(id: string | number): void {
                   text: {
                     type: "string",
                     description: "Extracted text from the image"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        name: APPEND_ANALYSIS_TOOL.name,
+        description: APPEND_ANALYSIS_TOOL.description,
+        inputSchema: {
+          type: "object",
+          properties: {
+            text_file_path: {
+              type: "string",
+              description: "Path to the OCR text file to append analysis to"
+            },
+            analysis: {
+              type: "string",
+              description: "The LLM's analysis to append to the file"
+            }
+          },
+          required: ["text_file_path", "analysis"]
+        },
+        outputSchema: {
+          type: "object",
+          properties: {
+            content: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    description: "Type of content (text)"
+                  },
+                  text: {
+                    type: "string",
+                    description: "Status message about the analysis being appended"
                   }
                 }
               }
@@ -934,38 +1219,48 @@ function main(): void {
   // Process each line from stdin
   rl.on('line', async (line: string) => {
     try {
-      // Log the message, but truncate it if it's too long
       const truncatedLine = line.length > 500 ? `${line.substring(0, 500)}...` : line;
       log(`Received message: ${truncatedLine}`);
       
-      // Parse the JSON-RPC request
       const request = JSON.parse(line) as JsonRpcRequest;
-      const { id, method } = request;
+      const { id, method, params } = request;
       
-      // Log more details about the request
       log(`Processing method: ${method}, id: ${id}`);
       
       // Check if this is a notification (methods that start with 'notifications/')
       if (method.startsWith('notifications/')) {
-        handleNotification(method, request.params);
-        return; // Notifications don't need a response
+        // Add specific handling for LLM response notifications
+        if (method === 'notifications/llm_response') {
+          logLlmResponse(params);
+          return;
+        }
+        handleNotification(method, params);
+        return;
       }
       
       // Handle different methods
       if (method === 'initialize') {
-        handleInitialize(id, request.params);
+        handleInitialize(id, params);
       }
       else if (method === 'ListOfferings') {
         handleListOfferings(id);
       }
       else if (method === 'callTool') {
-        await handleCallTool(id, request.params);
+        // Store the image path before processing
+        if (params?.arguments?.image_path) {
+          conversationState.lastImagePath = params.arguments.image_path;
+        }
+        await handleCallTool(id, params);
       }
       else if (method === 'tools/list') {
         handleToolsList(id);
       }
       else if (method === 'tools/call') {
-        await handleToolsCall(id, request.params);
+        // Store the image path before processing
+        if (params?.image_path) {
+          conversationState.lastImagePath = params.image_path;
+        }
+        await handleToolsCall(id, params);
       }
       else {
         log(`Method not supported: ${method}`);
@@ -992,4 +1287,44 @@ function main(): void {
 
 // Start the server
 main(); 
+
+// Add handler for the new append_analysis tool
+async function handleAppendAnalysis(args: { text_file_path: string; analysis: string }): Promise<McpToolResult> {
+  try {
+    const { text_file_path, analysis } = args;
+    
+    log(`Appending analysis to file: ${text_file_path}`);
+    log(`Analysis content: ${analysis}`);
+
+    // Verify the file exists and is a .txt file
+    if (!fs.existsSync(text_file_path)) {
+      throw new Error(`Text file not found: ${text_file_path}`);
+    }
+    if (!text_file_path.endsWith('.txt')) {
+      throw new Error('File must be a .txt file');
+    }
+
+    // Append the analysis
+    const timestamp = new Date().toISOString();
+    const separator = '\n\nLLM ANALYSIS:\n=============\n';
+    const appendText = `${separator}[${timestamp}]\n${analysis}\n`;
+
+    fs.appendFileSync(text_file_path, appendText, 'utf8');
+    log(`Successfully appended analysis to: ${text_file_path}`);
+
+    return {
+      content: [
+        { type: "text", text: `Analysis has been appended to: ${text_file_path}` }
+      ]
+    };
+  } catch (error) {
+    log(`Error appending analysis: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      content: [
+        { type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }
+      ],
+      isError: true
+    };
+  }
+}
 

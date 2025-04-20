@@ -1,39 +1,29 @@
 # OpenAI OCR MCP Server
 
-A Model Context Protocol (MCP) server that provides OCR capabilities using OpenAI's vision API. This server allows you to extract text from images using OpenAI's powerful vision model.
-
-## Prerequisites
-
-- Node.js (v16 or higher)
-- An OpenAI API key
-
-## Environment Setup
-
-This server requires an OpenAI API key to function. You must set it as an environment variable before running the server:
-
-```bash
-export OPENAI_API_KEY=your-api-key-here
-```
-
-You can obtain an API key from [OpenAI's platform](https://platform.openai.com/api-keys).
+A Model Context Protocol (MCP) server that provides OCR (Optical Character Recognition) functionality using OpenAI's vision capabilities. This server integrates with Cursor IDE to provide seamless text extraction from images.
 
 ## Features
 
-- Extract text from images using OpenAI's GPT-4o Vision model
-- MCP-compatible service for integration with Cursor and other MCP clients
-- Minimal implementation with no SDK dependencies
-- Written in TypeScript with full type safety
-- Communication via stdin/stdout for maximum compatibility
+- **Image Text Extraction**: Extract text from various image formats using OpenAI's GPT-4.1-mini vision model
+- **Automatic Text File Creation**: Automatically saves extracted text alongside the source image
+- **Content-Based File Naming**: Uses unique content hashing for organized file management
+- **Multiple Image Format Support**: Supports JPG, PNG, GIF, and WebP formats
+- **Robust Error Handling**: Comprehensive validation and error reporting
+- **Detailed Logging**: Debug-friendly logging for troubleshooting
 
-## How It Works
+## Technical Details
 
-This server implements the Model Context Protocol (MCP) specification as a stdio-based service. Instead of using HTTP:
+### Vision Model
+- Uses OpenAI's GPT-4.1-mini model
+- Optimized for text extraction from images
+- Supports high-detail image analysis
+- Processes images through OpenAI's vision API
 
-- The server reads JSON-RPC requests from stdin
-- Processes them to extract text from images using OpenAI's vision API
-- Writes JSON-RPC responses to stdout
-
-This approach makes it compatible with Cursor's MCP client system and other tools that can communicate via stdio pipes.
+### File Processing
+- Automatic text file creation
+- Content-based hash generation
+- Support for multiple image formats
+- Built-in file size validation
 
 ## Installation
 
@@ -42,77 +32,95 @@ This approach makes it compatible with Cursor's MCP client system and other tool
    ```bash
    npm install
    ```
-3. Build the project:
+3. Build the TypeScript code:
    ```bash
    npm run build
+   ```
+4. Set up your OpenAI API key in a `.env` file:
+   ```
+   OPENAI_API_KEY=your_api_key_here
    ```
 
 ## Usage
 
-The server is designed to work with Cursor IDE through the Model Context Protocol (MCP). Once properly configured in Cursor, you can use it to extract text from images.
+### In Cursor IDE
 
-### Tool Capabilities
+1. Configure the MCP server in your Cursor settings
+2. Use the OCR tool through Cursor's command palette
+3. Select an image file to process
+4. The extracted text will be:
+   - Displayed in Cursor
+   - Saved as a text file next to the image
 
-The server provides the following tool:
+### Text File Output
 
-- `extract_text_from_image`: Extracts text from a local image file
-  - Parameter: `image_path` (string) - Full path to a local image file
-  - Supported formats: .jpg, .jpeg, .png, .gif, .webp
-  - Maximum file size: 5MB
+For each processed image, the server creates a text file with the following naming convention:
 
-### Error Messages
-
-If you see an error about the OpenAI API key not being set, make sure you've set the environment variable correctly:
-
-```bash
-export OPENAI_API_KEY=your-api-key-here
+```
+{original_image_name}-{content_hash}.txt
 ```
 
-Note: You'll need to restart Cursor after setting the environment variable for it to take effect.
+Example:
+- Input image: `document.jpg`
+- Output file: `document-a1b2c3d4.txt`
+
+The `content_hash` is a unique 8-character hash generated from the extracted text, ensuring:
+- Unique filenames for different text content
+- Easy matching between source images and extracted text
+- Version tracking when the same image produces different results
+
+### Supported Image Formats
+
+- JPEG/JPG
+- PNG
+- GIF
+- WebP
+
+### File Size Limits
+
+- Maximum file size: 5MB
+- Files exceeding this limit will be rejected with an error message
+
+## Error Handling
+
+The server provides detailed error messages for common issues:
+- Invalid image formats
+- File size exceeded
+- File access problems
+- API key issues
+- Text extraction failures
 
 ## Development
 
-To build the TypeScript code:
+### Building from Source
+
 ```bash
 npm run build
 ```
 
-To run tests:
+### Running Tests
+
 ```bash
 npm test
 ```
 
-## Available Tools
+### Debugging
 
-- **extract_text_from_image**: Extract text from an image file
-  - Parameters:
-    - `image_path`: Path to a local image file
-  - Returns: Extracted text content
+The server provides detailed logs including:
+- API key validation
+- File processing steps
+- Text extraction results
+- File saving operations
 
-## Supported Image Types
+## Environment Variables
 
-- JPEG (.jpg, .jpeg)
-- PNG (.png)
-- GIF (.gif)
-- WebP (.webp)
+- `OPENAI_API_KEY`: Your OpenAI API key (required)
+- Supports both standard (`sk-...`) and project-specific (`sk-proj-...`) API keys
 
-## File Size Limits
+## Contributing
 
-The maximum file size is 5MB.
-
-## Implementation Details
-
-This server was originally implemented using the MCP SDK with an HTTP/SSE approach. However, we've moved to a simpler stdio-based approach for better compatibility with Cursor.
-
-The current implementation:
-
-- Is pure TypeScript with comprehensive type definitions
-- Makes OpenAI API calls using curl to avoid additional dependencies
-- Logs detailed information to stderr for debugging
-- Precisely matches the JSON-RPC protocol format used by MCP
-
-Logs and debug information are written to stderr, while JSON-RPC responses are written to stdout, ensuring clean communication via stdio pipes.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-[MIT](LICENSE)
+[MIT License](LICENSE)

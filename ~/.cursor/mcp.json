@@ -1,22 +1,5 @@
 {
   "mcpServers": {
-    "Excel": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@negokaz/excel-mcp-server",
-        "--config",
-        "\"{}\""
-      ]
-    },
-    "Obsidian-mcp": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "obsidian-mcp",
-        "/Users/cjus/dev/Charter-cbo/obsidian-vault"
-      ]
-    },
     "OpenAI-OCR": {
       "command": "node",
       "args": [

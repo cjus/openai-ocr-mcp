@@ -115,4 +115,4 @@ Logs and debug information are written to stderr, while JSON-RPC responses are w
 
 ## License
 
-[Add your license information here]
+[MIT](LICENSE)
